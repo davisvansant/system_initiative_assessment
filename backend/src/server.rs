@@ -10,9 +10,13 @@ use futures::sink::SinkExt;
 use futures::stream::{SplitSink, SplitStream, StreamExt};
 
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Receiver;
 
-use crate::state::{add_connection, add_message, get_connections};
+use uuid::Uuid;
+
+use crate::state::{
+    add_connection, add_message, get_connection, get_connections, remove_connection,
+};
 use crate::StateChannelSender;
 
 pub struct Server {
@@ -62,7 +66,9 @@ impl Server {
         let (mut sender, receiver) = websocket.split();
         let (sink_sender, mut sink_receiver) = mpsc::channel::<Message>(16);
 
-        if let Err(error) = add_connection(&state, sink_sender.to_owned()).await {
+        let connection_uuid = Uuid::new_v4();
+
+        if let Err(error) = add_connection(&state, connection_uuid.to_owned(), sink_sender).await {
             println!("error adding connection to state -> {:?}", error);
         }
 
@@ -73,15 +79,15 @@ impl Server {
         });
 
         tokio::spawn(async move {
-            if let Err(error) = Self::read_connection(&state, sink_sender, receiver).await {
+            if let Err(error) = Self::read_connection(connection_uuid, &state, receiver).await {
                 println!("error reading connection! -> {:?}", error);
             }
         });
     }
 
     async fn read_connection(
+        connection_uuid: Uuid,
         state: &StateChannelSender,
-        channel: Sender<Message>,
         mut receiver: SplitStream<WebSocket>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         while let Some(incoming) = receiver.next().await {
@@ -104,12 +110,20 @@ impl Server {
                 Ok(Message::Close(Some(close))) => {
                     println!("received close! -> {:?}", close);
 
-                    channel.send(Message::Close(Some(close))).await?;
+                    let connection = get_connection(state, connection_uuid).await?;
+
+                    connection.send(Message::Close(Some(close))).await?;
+
+                    remove_connection(state, connection_uuid).await?;
                 }
                 Ok(Message::Close(None)) => {
                     println!("received close!");
 
-                    channel.send(Message::Close(None)).await?;
+                    let connection = get_connection(state, connection_uuid).await?;
+
+                    connection.send(Message::Close(None)).await?;
+
+                    remove_connection(state, connection_uuid).await?;
                 }
                 Err(error) => println!("error receiving message -> {:?}", error),
             }
@@ -128,9 +142,9 @@ impl Server {
                 Message::Ping(ping) => sender.send(Message::Ping(ping)).await?,
                 Message::Pong(pong) => sender.send(Message::Pong(pong)).await?,
                 Message::Close(_close_frame) => {
-                    channel.close();
-
                     sender.close().await?;
+
+                    channel.close();
                 }
             }
         }
@@ -203,7 +217,7 @@ mod tests {
         let (mut test_websocket_client_writer, mut test_websocket_client_reader) =
             test_websocket_stream.split();
 
-        tokio::spawn(async move {
+        let test_websocket_sender = tokio::spawn(async move {
             tokio::time::sleep(core::time::Duration::from_millis(2000)).await;
 
             test_websocket_client_writer
@@ -211,13 +225,17 @@ mod tests {
                 .await
                 .unwrap();
 
+            tokio::time::sleep(core::time::Duration::from_millis(2000)).await;
+
             test_websocket_client_writer
                 .send(Message::Close(Some(CloseFrame {
                     code: CloseCode::Normal,
                     reason: std::borrow::Cow::Borrowed("test_goodbye!"),
                 })))
                 .await
-                .unwrap()
+                .unwrap();
+
+            tokio::time::sleep(core::time::Duration::from_millis(2000)).await;
         });
 
         while let Some(test_incoming_message) = test_websocket_client_reader.next().await {
@@ -229,7 +247,6 @@ mod tests {
                 Ok(Message::Ping(_)) => unimplemented!(),
                 Ok(Message::Pong(_)) => unimplemented!(),
                 Ok(Message::Close(test_close_message)) => {
-                    println!("test close message -> {:?}", &test_close_message);
                     assert!(test_close_message.is_some());
                     assert_eq!(
                         test_close_message
@@ -246,6 +263,8 @@ mod tests {
                 Err(_) => panic!("unexpected error in test websocket reader!"),
             }
         }
+
+        assert!(test_websocket_sender.await.is_ok());
 
         Ok(())
     }
