@@ -143,18 +143,29 @@ impl Server {
 mod tests {
     use super::*;
     use crate::{StateRequest, StateResponse};
-    use axum::body::Body;
     use axum::http::version::Version;
-    use axum::http::{Request, StatusCode};
+    use axum::http::StatusCode;
     use std::str::FromStr;
-    use tokio::sync::mpsc;
     use tokio::sync::oneshot;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+    use tokio_tungstenite::tungstenite::protocol::frame::CloseFrame;
+    use tokio_tungstenite::tungstenite::Message;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let test_address = SocketAddr::from_str("127.0.0.1:5555")?;
-        let (test_state_sender, _test_state_receiver) =
+        let (test_state_sender, test_state_receiver) =
             mpsc::channel::<(StateRequest, oneshot::Sender<StateResponse>)>(64);
+
+        let mut test_state = crate::State::init(test_state_receiver).await?;
+
+        tokio::spawn(async move {
+            if let Err(error) = test_state.run().await {
+                println!("error with test state -> {:?}", error);
+            }
+        });
+
         let mut test_server = Server::init(test_address, test_state_sender).await?;
 
         tokio::spawn(async move {
@@ -163,25 +174,78 @@ mod tests {
             }
         });
 
-        let test_client = hyper::Client::new();
+        let test_websocket_address = "ws://127.0.0.1:5555/messages";
 
-        let test_request = Request::builder()
-            .uri("http://127.0.0.1:5555/messages")
-            .header("connection", "upgrade")
-            .header("upgrade", "websocket")
-            .header("sec-websocket-version", "13")
-            .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
-            .body(Body::empty())?;
+        let (test_websocket_stream, test_websocket_response) =
+            connect_async(test_websocket_address).await?;
 
-        let test_response = test_client.request(test_request).await?;
+        assert_eq!(test_websocket_response.version(), Version::HTTP_11);
+        assert_eq!(
+            test_websocket_response.status(),
+            StatusCode::SWITCHING_PROTOCOLS,
+        );
 
-        assert_eq!(test_response.version(), Version::HTTP_11);
-        assert_eq!(test_response.status(), StatusCode::SWITCHING_PROTOCOLS);
+        let test_websocket_response_headers = test_websocket_response.headers();
 
-        let test_response_headers = test_response.headers();
+        assert_eq!(
+            test_websocket_response_headers.get("connection").unwrap(),
+            "upgrade",
+        );
+        assert_eq!(
+            test_websocket_response_headers.get("upgrade").unwrap(),
+            "websocket",
+        );
+        assert!(test_websocket_response_headers.contains_key("sec-websocket-accept"));
+        assert!(test_websocket_response_headers
+            .get("sec-websocket-protocol")
+            .is_none());
 
-        assert_eq!(test_response_headers.get("connection").unwrap(), "upgrade");
-        assert_eq!(test_response_headers.get("upgrade").unwrap(), "websocket");
+        let (mut test_websocket_client_writer, mut test_websocket_client_reader) =
+            test_websocket_stream.split();
+
+        tokio::spawn(async move {
+            tokio::time::sleep(core::time::Duration::from_millis(2000)).await;
+
+            test_websocket_client_writer
+                .send(Message::Text(String::from("test_message")))
+                .await
+                .unwrap();
+
+            test_websocket_client_writer
+                .send(Message::Close(Some(CloseFrame {
+                    code: CloseCode::Normal,
+                    reason: std::borrow::Cow::Borrowed("test_goodbye!"),
+                })))
+                .await
+                .unwrap()
+        });
+
+        while let Some(test_incoming_message) = test_websocket_client_reader.next().await {
+            match test_incoming_message {
+                Ok(Message::Text(test_text_message)) => {
+                    assert_eq!(test_text_message.as_str(), "test_message");
+                }
+                Ok(Message::Binary(_)) => unimplemented!(),
+                Ok(Message::Ping(_)) => unimplemented!(),
+                Ok(Message::Pong(_)) => unimplemented!(),
+                Ok(Message::Close(test_close_message)) => {
+                    println!("test close message -> {:?}", &test_close_message);
+                    assert!(test_close_message.is_some());
+                    assert_eq!(
+                        test_close_message
+                            .as_ref()
+                            .unwrap()
+                            .code
+                            .to_string()
+                            .as_str(),
+                        "1000",
+                    );
+                    assert_eq!(test_close_message.as_ref().unwrap().reason, "test_goodbye!");
+                }
+                Ok(Message::Frame(_)) => unimplemented!(),
+                Err(_) => panic!("unexpected error in test websocket reader!"),
+            }
+        }
 
         Ok(())
     }
