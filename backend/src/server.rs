@@ -1,20 +1,16 @@
-use std::net::SocketAddr;
-
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Extension;
 use axum::Router;
-
 use futures::sink::SinkExt;
 use futures::stream::{SplitSink, SplitStream, StreamExt};
-
+use std::net::SocketAddr;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Receiver;
-
 use uuid::Uuid;
 
-use crate::state::{
+use crate::channel::{
     add_connection, add_message, get_connection, get_connections, remove_connection,
 };
 use crate::StateChannelSender;

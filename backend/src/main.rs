@@ -1,14 +1,14 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::str::FromStr;
+use tokio::sync::{mpsc, oneshot};
 
-use tokio::sync::mpsc;
-use tokio::sync::oneshot;
+use channel::{StateChannelSender, StateRequest, StateResponse};
+use server::Server;
+use state::State;
 
+mod channel;
 mod server;
 mod state;
-
-use server::Server;
-use state::{State, StateChannelSender, StateRequest, StateResponse};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
