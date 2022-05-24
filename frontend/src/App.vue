@@ -2,80 +2,106 @@
   <div id="system_init" class="system_init">
     <div id="title" class="title">
       <span class="welcome">welcome to the system initative</span>
-      <button id="close_connection" class="close_connection" @click="closeConnection()">close connection</button>
+      <button
+        id="close_connection"
+        class="close_connection"
+        @click="closeConnection()"
+      >
+        close connection
+      </button>
     </div>
-    <hr class="hr">
+    <hr class="hr" />
     <div class="new_messages">
       <span class="new_message">new message</span>
-      <input type="text" class="new_message_input" id="new_message_input" @keyup.enter="sendMessage()">
-      <button id="send_new_message" class="send_new_message" @click="sendMessage()">send</button>
+      <input
+        type="text"
+        class="new_message_input"
+        id="new_message_input"
+        @keyup.enter="sendMessage()"
+      />
+      <button
+        id="send_new_message"
+        class="send_new_message"
+        @click="sendMessage()"
+      >
+        send
+      </button>
     </div>
     <div id="incoming_messages" class="incoming_messages">
-      <p id="message" class="message" v-for="message in messages" :key="message">{{ message }}</p>
+      <p
+        id="message"
+        class="message"
+        v-for="message in messages"
+        :key="message"
+      >
+        {{ message }}
+      </p>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { defineComponent } from 'vue'
-import { webSocket } from 'rxjs/webSocket'
-
+import { defineComponent } from "vue";
+import { webSocket } from "rxjs/webSocket";
 </script>
 
 <script lang="ts">
 export default defineComponent({
-  name: 'app',
-  data () {
+  name: "app",
+  data() {
     return {
       connection: webSocket.prototype,
-      messages: [] as string[]
-    }
+      messages: [] as string[],
+    };
   },
-  created () {
-    const url = 'ws://localhost:5555/messages'
-    const connection = webSocket(url)
-    const messages: string[] = []
+  created() {
+    const url = "ws://localhost:5555/messages";
+    const connection = webSocket(url);
+    const messages: string[] = [];
 
-    this.connection = connection
+    this.messages = messages;
+    this.connection = connection;
 
     connection.subscribe({
-      next: message => {
-        this.receiveMessage(message as string)
+      next: (message) => {
+        this.receiveMessage(message as string);
       },
-      error: error => console.log(error),
-      complete: () => console.log('connection closed')
-    })
+      error: (error) => console.log(error),
+      complete: () => console.log("connection closed"),
+    });
   },
   methods: {
-    closeConnection () {
-      this.connection.error({ code: 1000, reason: 'goodbye!' })
+    closeConnection() {
+      this.connection.error({ code: 1000, reason: "goodbye!" });
     },
-    receiveMessage (incomingMessage: string) {
-      this.messages.push(incomingMessage)
+    receiveMessage(incomingMessage: string) {
+      this.messages.push(incomingMessage);
 
-      return this.messages
+      return this.messages;
     },
-    sendMessage () {
-      const newMessage = document.getElementById('new_message_input') as HTMLInputElement
+    sendMessage() {
+      const newMessage = document.getElementById(
+        "new_message_input"
+      ) as HTMLInputElement;
 
-      console.log('new message ->', newMessage.value)
+      console.log("new message ->", newMessage.value);
 
       if (newMessage != null) {
-        this.connection.next(newMessage.value)
+        this.connection.next(newMessage.value);
 
-        const clear = newMessage.value = ''
+        const clear = (newMessage.value = "");
 
-        return clear
+        return clear;
       }
-    }
-  }
-})
+    },
+  },
+});
 </script>
 
 <style>
- body {
-   background-color: black;
- }
+body {
+  background-color: black;
+}
 
 .system_init {
   display: flex;
@@ -88,15 +114,15 @@ export default defineComponent({
 }
 
 .title {
-  display: flex; 
+  display: flex;
   flex-direction: row;
-  align-items: none; 
+  align-items: none;
   justify-content: space-between;
 }
 
 .welcome {
   color: snow;
-  font-family: 'Courier New', Courier, monospace;
+  font-family: "Courier New", Courier, monospace;
   font-size: 16px;
   letter-spacing: 5px;
 }
@@ -156,7 +182,7 @@ export default defineComponent({
   width: 75px;
   margin: 15px;
   padding: 5px;
-  transition-duration: .5s;
+  transition-duration: 0.5s;
 }
 
 .send_new_message:hover {
@@ -168,13 +194,13 @@ export default defineComponent({
   align-self: center;
   align-items: center;
   overflow: auto;
-  flex-direction: column; 
+  flex-direction: column;
   width: 85%;
   height: 85%;
 }
 
 .message {
-  font-family: 'Courier New', Courier, monospace;
+  font-family: "Courier New", Courier, monospace;
   font-size: 12px;
   color: snow;
   box-shadow: 4px 4px 8px aquamarine;
@@ -184,5 +210,4 @@ export default defineComponent({
   text-align: center;
   padding: 5px;
 }
-
 </style>
